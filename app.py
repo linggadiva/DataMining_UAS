@@ -1,59 +1,80 @@
+
 import streamlit as st
 import pandas as pd
-import pickle
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestClassifier
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Load model dan scaler
-with open("scaler.pkl", "rb") as f:
-    scaler = pickle.load(f)
+st.set_page_config(page_title="Dashboard Analisis Produk", layout="wide")
 
-with open("random_forest_model.pkl", "rb") as f:
-    model = pickle.load(f)
+st.title("🛍️ Dashboard Analisis Produk E-Commerce")
 
-# Load data
-df = pd.read_csv("produk_klaster.csv")
+uploaded_file = st.file_uploader("📁 Unggah file CSV data produk", type=["csv"])
 
-st.title("Prediksi dan Visualisasi Klaster Produk")
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
 
-st.markdown("Masukkan fitur produk untuk memprediksi klasternya.")
+    # Pembersihan dan transformasi data
+    df = df[['product_name', 'product_category_tree', 'retail_price', 'discounted_price', 'product_rating']]
+    df.columns = ['nama_produk','jenis_produk', 'harga_retail', 'harga_diskon', 'rating']
+    df['harga_retail'] = pd.to_numeric(df['harga_retail'], errors='coerce')
+    df['harga_diskon'] = pd.to_numeric(df['harga_diskon'], errors='coerce')
+    df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
+    df = df.dropna()
+    df = df[df['harga_diskon'] > 0]
+    df['diskon'] = df['harga_retail'] - df['harga_diskon']
+    df['best_seller'] = ((df['harga_diskon'] < df['harga_diskon'].median()) & (df['rating'] >= 4)).astype(int)
 
-# Cek apakah kolom klaster ada
-if "klaster" not in df.columns:
-    st.warning("Kolom 'klaster' tidak ditemukan di CSV, visualisasi terbatas.")
-    df["klaster"] = -1  # Tambahkan dummy cluster
+    # Clustering
+    X_cluster = df[['harga_diskon', 'rating', 'diskon']]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_cluster)
 
-# Ambil kolom fitur (tanpa kolom klaster)
-fitur_input = df.drop(columns=["klaster"], errors="ignore").columns.tolist()
+    kmeans = KMeans(n_clusters=3, random_state=42)
+    df['klaster'] = kmeans.fit_predict(X_scaled)
 
-# Input fitur dari user
-user_input = {}
-for fitur in fitur_input:
-    nilai_min = float(df[fitur].min())
-    nilai_max = float(df[fitur].max())
-    nilai_mean = float(df[fitur].mean())
-    user_input[fitur] = st.number_input(
-        label=f"{fitur}",
-        min_value=nilai_min,
-        max_value=nilai_max,
-        value=nilai_mean
-    )
+    st.sidebar.header("📌 Navigasi")
+    page = st.sidebar.radio("Pilih Halaman:", ["Dashboard Klasterisasi", "Prediksi Best Seller", "Tabel Rekomendasi"])
 
-# Tombol prediksi
-if st.button("Prediksi Klaster"):
-    input_df = pd.DataFrame([user_input])
-    input_scaled = scaler.transform(input_df)
-    pred = model.predict(input_scaled)
-    st.success(f"Produk diprediksi masuk ke dalam klaster: **{pred[0]}**")
+    if page == "Dashboard Klasterisasi":
+        st.subheader("📊 Visualisasi Klaster Produk")
+        fig, ax = plt.subplots()
+        scatter = ax.scatter(df['harga_diskon'], df['rating'], c=df['klaster'], cmap='Set1')
+        ax.set_xlabel('Harga Diskon')
+        ax.set_ylabel('Rating')
+        ax.set_title("Clustering Produk")
+        st.pyplot(fig)
 
-# Visualisasi data
-st.header("Visualisasi Klaster")
+        with st.expander("🧾 Deskripsi Klaster"):
+            for k in sorted(df['klaster'].unique()):
+                desc = df[df['klaster'] == k].describe()
+                st.markdown(f"**Klaster {k}**")
+                st.write(desc[['harga_diskon', 'rating', 'diskon']])
 
-# Pilih fitur untuk visualisasi
-fitur_x = st.selectbox("Pilih fitur untuk sumbu X", fitur_input, index=0)
-fitur_y = st.selectbox("Pilih fitur untuk sumbu Y", fitur_input, index=1)
+    elif page == "Prediksi Best Seller":
+        st.subheader("📈 Prediksi Produk Baru: Best Seller atau Tidak")
+        with st.form("form_prediksi"):
+            harga_diskon = st.number_input("Harga Diskon", min_value=0)
+            rating = st.slider("Rating Produk", 0.0, 5.0, step=0.1)
+            harga_retail = st.number_input("Harga Retail", min_value=0)
+            submitted = st.form_submit_button("Prediksi")
 
-fig, ax = plt.subplots()
-sns.scatterplot(data=df, x=fitur_x, y=fitur_y, hue="klaster", palette="Set2", ax=ax)
-ax.set_title("Visualisasi Klaster Berdasarkan Fitur")
-st.pyplot(fig)
+        if submitted:
+            diskon = harga_retail - harga_diskon
+            model = RandomForestClassifier(random_state=42)
+            model.fit(df[['harga_diskon', 'rating', 'diskon']], df['best_seller'])
+            pred = model.predict([[harga_diskon, rating, diskon]])
+            st.success("✅ Produk ini **berpotensi Best Seller!**" if pred[0] == 1 else "⚠️ Produk ini **kurang potensial sebagai Best Seller.**")
+
+    elif page == "Tabel Rekomendasi":
+        st.subheader("📋 Produk yang Direkomendasikan untuk Dipromosikan")
+        rekomendasi = df[(df['best_seller'] == 0) & (df['rating'] >= 3.5)]
+        st.write("🔍 Produk dengan rating cukup tinggi namun belum termasuk best-seller:")
+        st.dataframe(rekomendasi[['nama_produk', 'harga_diskon', 'rating', 'klaster']])
+
+        with st.expander("💡 Insight"):
+            st.markdown("- Produk dalam **klaster dengan diskon besar dan rating tinggi** cenderung jadi best-seller.")
+            st.markdown("- Coba **naikkan rating** dengan meningkatkan kualitas atau ulasan.")
