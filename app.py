@@ -57,9 +57,9 @@ if uploaded_file is not None:
     elif page == "Prediksi Best Seller":
         st.subheader("📈 Prediksi Produk Baru: Best Seller atau Tidak")
         with st.form("form_prediksi"):
-            harga_diskon = st.number_input("Harga Diskon", min_value=0)
+            harga_diskon = st.number_input("Harga Diskon EUR", min_value=0)
             rating = st.slider("Rating Produk", 0.0, 5.0, step=0.1)
-            harga_retail = st.number_input("Harga Retail", min_value=0)
+            harga_retail = st.number_input("Harga Retail EUR", min_value=0)
             submitted = st.form_submit_button("Prediksi")
 
         if submitted:
